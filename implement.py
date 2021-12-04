@@ -1,23 +1,3 @@
-import os
-os.environ['NUMBAPRO_LIBDEVICE'] = "/usr/local/cuda-10.0/nvvm/libdevice"
-os.environ['NUMBAPRO_NVVM'] = "/usr/local/cuda-10.0/nvvm/lib64/libnvvm.so"
-import random
-from tqdm import tqdm
-import numpy as np
-import torch, torchvision
-import torch.nn as nn
-import torch.nn.functional as F
-import torch.optim as optim
-from torchvision import datasets, transforms
-from torch.utils.data.dataset import Dataset
-from torchvision import transforms 
-from torchvision.transforms import Compose 
-torch.backends.cudnn.benchmark=True
-
-from dataset import get_cifar10
-
-dtype=object
-
 __all__ = [
     'VGG', 'vgg11', 'vgg11_bn', 'vgg13', 'vgg13_bn', 'vgg16', 'vgg16_bn',
     'vgg19_bn', 'vgg19',
@@ -40,6 +20,8 @@ cfg = {
         'VGG16': [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 'M', 512, 512, 512, 'M', 512, 512, 512, 'M'],
         'VGG19': [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 256, 'M', 512, 512, 512, 512, 'M', 512, 512, 512, 512, 'M'],
     }
+
+dtype=object
 
 class VGG(nn.Module):
     def __init__(self, vgg_name):
@@ -128,16 +110,19 @@ class VGG(nn.Module):
       test_loss /= len(test_loader.dataset)
       acc = correct / len(test_loader.dataset)
 
+      print('comm-round: {} | average train loss {%0.3g} | test loss {%0.3g} | test acc: {%0.3f}' % (r, loss_retrain / num_selected, test_loss, acc))
+      
+
       return test_loss, acc
 
 classes_pc = 2
 num_clients = 20
 num_selected = 6
-num_rounds = 150
-epochs = 5
+num_rounds = 5
+epochs = 2
 batch_size = 32
 baseline_num = 100
-retrain_epochs = 20  
+retrain_epochs = 2
       
 #### global model ##########
 global_model =  VGG('VGG19').cuda()
@@ -152,20 +137,7 @@ for model in client_models:
 
 
 ###### optimizers ################
-def _make_optimizer(self):
-        if self.optimizer is not None:
-            return
-
-        # Also prepare optimizer:
-        optimizer_name = self.hyperparameters["optimizer"].lower()
-        if optimizer_name == "sgd":
-            self.optimizer = optim.SGD(
-                params=self.parameters(),
-                lr=self.hyperparameters["learning_rate"],
-                momentum=self.hyperparameters["momentum"],
-            )
-        else:
-          raise Exception('Unknown optimizer "%s".' % (self.params["optimizer"])) 
+opt = [optim.SGD(model.parameters(), lr=0.01) for model in client_models]
 
 def baseline_data(num):
           xtrain, ytrain, xtmp,ytmp = get_cifar10()
@@ -190,15 +162,53 @@ losses_retrain=[]
 
 np.warnings.filterwarnings('ignore', category=np.VisibleDeprecationWarning)
 
+def client_syn(client_model, global_model):
+ 
+    client_model.load_state_dict(global_model.state_dict())
+
+def client_update(client_model, optimizer, train_loader, epoch=5):
+  
+        model.train()
+        for e in range(epoch):
+            for batch_idx, (data, target) in enumerate(train_loader):
+                data, target = data.cuda(), target.cuda()
+                optimizer.zero_grad()
+                output = client_model(data)
+                loss = F.nll_loss(output, target)
+                loss.backward()
+                optimizer.step()
+        return loss.item()
+
+def test(global_model, test_loader):
+    
+      model.eval()
+      test_loss = 0
+      correct = 0
+      with torch.no_grad():
+          for data, target in test_loader:
+              data, target = data.cuda(), target.cuda()
+              output = global_model(data)
+              test_loss += F.nll_loss(output, target, reduction='sum').item()  # sum up batch loss
+              pred = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
+              correct += pred.eq(target.view_as(pred)).sum().item()
+
+      test_loss /= len(test_loader.dataset)
+      acc = correct / len(test_loader.dataset)
+
+      print('comm-round: {} | average train loss {%0.3g} | test loss {%0.3g} | test acc: {%0.3f}' % (r, loss_retrain / num_selected, test_loss, acc))
+      
+
+      return test_loss, acc
+
+
 # Runnining FL
 for r in range(num_rounds):    #Communication round
+    
     # select random clients
     client_idx = np.random.permutation(num_clients)[:num_selected]
     client_lens = [len(train_loader[idx]) for idx in client_idx]
 
-def client_syn(client_model, global_model):
- 
-    client_model.load_state_dict(global_model.state_dict())
+
     # client update
     loss = 0
     for i in tqdm(range(num_selected)):
@@ -210,14 +220,32 @@ def client_syn(client_model, global_model):
     #### retraining on the global server
     loss_retrain =0
     for i in tqdm(range(num_selected)):
-      loss_retrain+= client_update(client_models[i], opt[i], loader_fixed, iterations=retrain_epochs)
+      loss_retrain+= client_update(client_models[i], opt[i], loader_fixed)
     losses_retrain.append(loss_retrain)
     
-    ### Aggregating the models
-    server_aggregate(global_model, client_models,client_lens)
-    test_loss, acc = test(global_model, test_loader)
-    losses_test.append(test_loss)
-    acc_test.append(acc)
-    print('%d-th round' % r)
-    print('average train loss %0.3g | test loss %0.3g | test acc: %0.3f' % (loss_retrain / num_selected, test_loss, acc))
+    def test(global_model, test_loader):
+    
+      model.eval()
+      test_loss = 0
+      correct = 0
+      with torch.no_grad():
+          for data, target in test_loader:
+              data, target = data.cuda(), target.cuda()
+              output = global_model(data)
+              test_loss += F.nll_loss(output, target, reduction='sum').item()  # sum up batch loss
+              pred = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
+              correct += pred.eq(target.view_as(pred)).sum().item()
 
+      test_loss /= len(test_loader.dataset)
+      acc = correct / len(test_loader.dataset)
+      return test_loss, acc
+
+    def server_aggregate(global_model, client_models,client_lens):
+      test_loss, acc = test(global_model, test_loader)
+      losses_test.append(test_loss)
+      acc_test.append(acc)
+
+    print('%d-th round' % r)
+    #print('average train loss %0.3g | test loss %0.3g | test acc: %0.3f' % (loss_retrain / num_selected, test_loss, acc))
+ 
+  
