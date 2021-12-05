@@ -13,7 +13,7 @@ To view a demo of this project, download the repository, install the dependencie
 
 You can also view the demo using the link below.
 
-[Video Demo](https://boiling-fjord-62718.herokuapp.com/)
+[Video Demo](https://drive.google.com/file/d/1g5gtRGUwO_StsmprreFcrM7gtioc1Aji/view?usp=sharing)
 
 App Functionalities
 --------------------
